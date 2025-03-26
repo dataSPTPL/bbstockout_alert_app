@@ -7,6 +7,118 @@ import json
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
+# --- Page Configuration ---
+st.set_page_config(
+    page_title="BigBasket Stock Dashboard",
+    page_icon="🛒",
+    layout="wide"
+)
+
+# --- Inline CSS Styles ---
+st.markdown("""
+<style>
+    /* Navigation Bar */
+    .navbar {
+        background-color: #2c3e50;
+        overflow: hidden;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 2rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .navbar-brand {
+        color: white;
+        font-weight: bold;
+        font-size: 1.5rem;
+    }
+    
+    .navbar-links {
+        display: flex;
+        gap: 1.5rem;
+    }
+    
+    .nav-link {
+        color: white;
+        text-decoration: none;
+        font-size: 1rem;
+        transition: color 0.3s;
+    }
+    
+    .nav-link:hover {
+        color: #3498db;
+    }
+    
+    /* Input and Select Boxes */
+    .stSelectbox > div > div > input {
+        padding: 10px !important;
+    }
+    
+    /* Buttons */
+    .stButton > button {
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-weight: 500;
+        transition: all 0.3s;
+        background-color: #3498db;
+        color: white;
+        border: none;
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        background-color: #2980b9;
+    }
+    
+    /* Metrics Cards */
+    .stMetric {
+        border-radius: 8px;
+        padding: 1rem;
+        background-color: #f8f9fa;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    
+    /* Dataframe Styling */
+    .dataframe {
+        border-radius: 8px !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+    }
+    
+    /* Expander Styling */
+    .stExpander {
+        border-radius: 8px !important;
+        border: 1px solid #e1e4e8 !important;
+    }
+    
+    /* Custom Card Styling */
+    .custom-card {
+        border-radius: 8px;
+        padding: 1.5rem;
+        background-color: white;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        margin-bottom: 1.5rem;
+    }
+    
+    /* Tab Styling */
+    .stTabs [role="tablist"] {
+        margin-bottom: 1rem;
+    }
+    
+    .stTabs [role="tab"] {
+        padding: 0.5rem 1rem;
+        border-radius: 8px 8px 0 0;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #3498db;
+        color: white;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # --- Google Sheets Setup with Streamlit Secrets ---
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SPREADSHEET_ID = '1sgpXQJW9oUjMpAbDUYa7J3qZALY5hwFsJGlcd9cd-8c'
@@ -16,7 +128,19 @@ creds_dict = json.loads(st.secrets["google_sheets"]["SERVICE_ACCOUNT_JSON"])
 creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
 service = build('sheets', 'v4', credentials=creds)
 
-# Function to fetch brands and URLs from Sheet1
+# --- Navigation Bar ---
+st.markdown("""
+<nav class="navbar">
+    <div class="navbar-brand">BigBasket Stock Dashboard</div>
+    <div class="navbar-links">
+        <a href="#" class="nav-link">Home</a>
+        <a href="#" class="nav-link">Reports</a>
+        <a href="#" class="nav-link">Settings</a>
+    </div>
+</nav>
+""", unsafe_allow_html=True)
+
+# --- Function Definitions ---
 def fetch_brands_from_sheet1():
     result = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
@@ -30,7 +154,6 @@ def fetch_brands_from_sheet1():
     df = pd.DataFrame(data, columns=headers)
     return df[['Brand Name', 'Brand URL']]
 
-# Function to scrape brand data using requests
 def scrape_brand_data(brand_name, brand_url):
     try:
         headers = {
@@ -95,7 +218,6 @@ def scrape_brand_data(brand_name, brand_url):
         st.error(f"Error scraping {brand_name}: {str(e)}")
         return pd.DataFrame()
 
-# Function to append data to Sheet2
 def append_to_sheet2(df):
     if df.empty:
         return
@@ -120,8 +242,7 @@ def append_to_sheet2(df):
         body={'values': sheet_data}
     ).execute()
 
-# Function to fetch and filter out-of-stock products
-def get_out_of_stock_products(brand_name):
+def get_all_products(brand_name):
     result = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
         range='Sheet2'
@@ -134,92 +255,146 @@ def get_out_of_stock_products(brand_name):
     data = values[1:]
     df = pd.DataFrame(data, columns=headers)
     
-    if 'Brand' not in df.columns or 'Stock Availability' not in df.columns:
+    if 'Brand' not in df.columns:
         return pd.DataFrame()
     
-    out_of_stock = df[(df['Brand'] == brand_name) & (df['Stock Availability'] != 'In Stock')]
+    brand_products = df[df['Brand'] == brand_name]
+    return brand_products
+
+def get_out_of_stock_products(brand_name):
+    brand_products = get_all_products(brand_name)
+    if brand_products.empty or 'Stock Availability' not in brand_products.columns:
+        return pd.DataFrame()
+    
+    out_of_stock = brand_products[brand_products['Stock Availability'] != 'In Stock']
     return out_of_stock
 
-# --- Streamlit UI ---
-st.title("BigBasket Stock Dashboard")
+# --- Main App ---
+st.title("🛒 BigBasket Stock Analysis Dashboard")
+st.markdown("---")
 
 # Fetch brand list and URLs from Sheet1
 brands_df = fetch_brands_from_sheet1()
 brand_list = brands_df['Brand Name'].tolist()
 
-# Single container for all functionality
-with st.container():
-    # Your Brand Section
-    st.subheader("Your Brand")
-    own_brand = st.text_input("Type your brand name", key="own_brand", help="Start typing to see suggestions")
+# Create tabs
+tab1, tab2 = st.tabs(["Your Brand Analysis", "Competitor Brand Analysis"])
+
+with tab1:
+    st.subheader("Your Brand Analysis")
     
-    # Display suggestions as a selectbox below the input
+    # Autocomplete search for own brand
+    own_brand = st.selectbox(
+        "Search for your brand",
+        options=brand_list,
+        index=None,
+        placeholder="Start typing to search...",
+        key="own_brand_search"
+    )
+    
     if own_brand:
-        suggestions = [b for b in brand_list if own_brand.lower() in b.lower()]
-    else:
-        suggestions = brand_list
-    
-    if suggestions:  # Only show selectbox if there are suggestions
-        selected_own_brand = st.selectbox("Suggestions (select or keep typing)", suggestions, key="own_suggestion")
-    else:
-        selected_own_brand = own_brand  # Use typed value if no suggestions
-    
-    if st.button("Submit Your Brand", key="own_submit"):
-        # Use the selected suggestion if available, otherwise the typed value
-        final_own_brand = selected_own_brand if selected_own_brand in brand_list else own_brand
-        brand_url = brands_df[brands_df['Brand Name'] == final_own_brand]['Brand URL'].iloc[0] if final_own_brand in brand_list else f"https://www.bigbasket.com/pb/{final_own_brand.lower()}/"
-        with st.spinner(f"Scraping data for {final_own_brand}..."):
-            df = scrape_brand_data(final_own_brand, brand_url)
-            if not df.empty:
-                append_to_sheet2(df)
-                st.success(f"Scraped and saved data for {final_own_brand}")
-            else:
-                st.warning(f"No data scraped for {final_own_brand}")
+        brand_url = brands_df[brands_df['Brand Name'] == own_brand]['Brand URL'].iloc[0]
         
-        out_of_stock_df = get_out_of_stock_products(final_own_brand)
-        if not out_of_stock_df.empty:
-            st.write(f"Out-of-Stock Products for {final_own_brand}:")
-            st.dataframe(out_of_stock_df)
-        else:
-            st.write(f"No out-of-stock products found for {final_own_brand}.")
-
-    st.markdown("---")
-
-    # Competitor Brands Section
-    st.subheader("Competitor Brands (up to 5)")
-    competitor_brands = []
-    for i in range(5):
-        comp_brand = st.text_input(f"Competitor Brand {i+1}", key=f"comp_{i}", help="Start typing to see suggestions")
-        
-        if comp_brand:
-            suggestions = [b for b in brand_list if comp_brand.lower() in b.lower()]
-        else:
-            suggestions = brand_list
-        
-        if suggestions:
-            selected_comp_brand = st.selectbox(f"Suggestions for Competitor {i+1}", suggestions, key=f"comp_suggestion_{i}")
-        else:
-            selected_comp_brand = comp_brand
-        
-        competitor_brands.append(selected_comp_brand if selected_comp_brand in brand_list else comp_brand)
-
-    if st.button("Submit Competitor Brands", key="comp_submit"):
-        selected_brands = [b for b in competitor_brands if b]  # Filter out empty inputs
-        if selected_brands:
-            with st.spinner("Scraping competitor data..."):
-                for brand in selected_brands:
-                    brand_url = brands_df[brands_df['Brand Name'] == brand]['Brand URL'].iloc[0] if brand in brand_list else f"https://www.bigbasket.com/pb/{brand.lower()}/"
-                    df = scrape_brand_data(brand, brand_url)
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Scrape Current Data", key="own_scrape"):
+                with st.spinner(f"Scraping current data for {own_brand}..."):
+                    df = scrape_brand_data(own_brand, brand_url)
                     if not df.empty:
                         append_to_sheet2(df)
-                st.success(f"Scraped and saved data for {', '.join(selected_brands)}")
-            
-            for brand in selected_brands:
-                out_of_stock_df = get_out_of_stock_products(brand)
-                if not out_of_stock_df.empty:
-                    st.write(f"Out-of-Stock Products for {brand}:")
-                    st.dataframe(out_of_stock_df)
+                        st.success(f"Scraped and saved current data for {own_brand}")
+                    else:
+                        st.warning(f"No data scraped for {own_brand}")
+        
+        with col2:
+            if st.button("View Historical Data", key="own_history"):
+                all_products = get_all_products(own_brand)
+                if not all_products.empty:
+                    st.subheader(f"All Products for {own_brand}")
+                    st.dataframe(all_products, use_container_width=True)
                 else:
-                    st.write(f"No out-of-stock products found for {brand}.")
+                    st.warning(f"No historical data found for {own_brand}")
+        
+        # Display out of stock products
+        out_of_stock_df = get_out_of_stock_products(own_brand)
+        if not out_of_stock_df.empty:
+            st.subheader(f"Out-of-Stock Products for {own_brand}")
+            st.dataframe(
+                out_of_stock_df,
+                use_container_width=True,
+                column_config={
+                    "Product URL": st.column_config.LinkColumn("Product Link")
+                }
+            )
         else:
-            st.warning("Please enter at least one competitor brand.")
+            st.info(f"No out-of-stock products found for {own_brand}")
+
+with tab2:
+    st.subheader("Competitor Brand Analysis")
+    
+    # Multiselect for competitor brands
+    competitor_brands = st.multiselect(
+        "Select competitor brands (max 5)",
+        options=brand_list,
+        default=None,
+        placeholder="Start typing to search...",
+        max_selections=5,
+        key="comp_brands"
+    )
+    
+    if competitor_brands:
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Scrape Competitor Data", key="comp_scrape"):
+                with st.spinner("Scraping competitor data..."):
+                    for brand in competitor_brands:
+                        brand_url = brands_df[brands_df['Brand Name'] == brand]['Brand URL'].iloc[0]
+                        df = scrape_brand_data(brand, brand_url)
+                        if not df.empty:
+                            append_to_sheet2(df)
+                    st.success(f"Scraped and saved data for {', '.join(competitor_brands)}")
+        
+        with col2:
+            if st.button("View All Competitor Data", key="comp_history"):
+                for brand in competitor_brands:
+                    all_products = get_all_products(brand)
+                    if not all_products.empty:
+                        st.subheader(f"All Products for {brand}")
+                        st.dataframe(all_products, use_container_width=True)
+                    else:
+                        st.warning(f"No data found for {brand}")
+        
+        # Display out of stock analysis for each competitor
+        for brand in competitor_brands:
+            st.markdown(f'<div class="custom-card">', unsafe_allow_html=True)
+            st.subheader(f"Analysis for {brand}")
+            
+            out_of_stock_df = get_out_of_stock_products(brand)
+            all_products_df = get_all_products(brand)
+            
+            if not all_products_df.empty:
+                total_products = len(all_products_df)
+                out_of_stock_count = len(out_of_stock_df)
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Products", total_products)
+                col2.metric("Out-of-Stock Products", out_of_stock_count)
+                col3.metric("Out-of-Stock Percentage", 
+                           f"{(out_of_stock_count/total_products*100):.1f}%" if total_products > 0 else "0%")
+                
+                if not out_of_stock_df.empty:
+                    with st.expander(f"View Out-of-Stock Products for {brand}"):
+                        st.dataframe(out_of_stock_df, use_container_width=True)
+                else:
+                    st.info(f"No out-of-stock products found for {brand}")
+            else:
+                st.warning(f"No products found for {brand}")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+# Footer
+st.markdown("---")
+st.markdown(f"""
+<div style="text-align: center; padding: 10px;">
+    <p>BigBasket Stock Dashboard • Updated at {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+</div>
+""", unsafe_allow_html=True)

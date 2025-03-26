@@ -52,9 +52,9 @@ def scrape_brand_data(brand_name, brand_url):
             quantity = container.find('div', class_='py-1.5 xl:py-1')
             quantity = quantity.text.strip() if quantity else "N/A"
             
-            # Stock Availability - More robust detection
-            stock_elements = container.find_all('span', class_='Label-sc-15v1nk5-0 Tags___StyledLabel2-sc-aeruf4-1 gJxZPQ gPgOvC')
-            stock_status = stock_elements.text.strip() if stock_elements else "In Stock"
+            # Stock Availability - Correctly detect "Currently unavailable"
+            stock_elem = container.find('span', class_='Label-sc-15v1nk5-0 Tags___StyledLabel2-sc-aeruf4-1 gJxZPQ gPgOvC')
+            stock_status = stock_elem.text.strip() if stock_elem else "In Stock"  # "Currently unavailable" if present, else "In Stock"
             
             # Product URL
             product_link = container.find('a', href=True)
@@ -80,28 +80,22 @@ def scrape_brand_data(brand_name, brand_url):
 def append_to_sheet2(df):
     if df.empty:
         return
-    values = df.values.tolist()
-    body = {
-        'values': values
-    }
+    values = [df.columns.tolist()] + df.values.tolist()  # Include headers
     result = service.spreadsheets().values().append(
         spreadsheetId=SPREADSHEET_ID,
         range='Sheet2',
         valueInputOption='RAW',
-        body=body
+        body={'values': values}
     ).execute()
     return result
 
 def get_out_of_stock_products(brand_name):
-    result = service.spreadsheets().values().get(
-        spreadsheetId=SPREADSHEET_ID,
-        range='Sheet2'
-    ).execute()
+    result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range='Sheet2').execute()
     values = result.get('values', [])
     if not values or len(values) < 2:
         return pd.DataFrame()
     df = pd.DataFrame(values[1:], columns=values[0])
-    return df[(df['Brand'] == brand_name) & (df['Stock Availability'] == 'Out of Stock')]
+    return df[(df['Brand'] == brand_name) & (df['Stock Availability'] == 'Currently unavailable')]
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="BigBasket Stock Dashboard", layout="wide")
@@ -116,7 +110,6 @@ st.markdown("""
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 20px;
     }
     .navbar a {
         color: white;
@@ -130,8 +123,6 @@ st.markdown("""
         background-color: #4CAF50;
         color: white;
         border-radius: 4px;
-        padding: 8px 16px;
-        border: none;
     }
     .stButton>button:hover {
         background-color: #45a049;
@@ -139,11 +130,6 @@ st.markdown("""
     .out-of-stock {
         color: red;
         font-weight: bold;
-    }
-    /* Autocomplete dropdown styling */
-    .stSelectbox div[data-baseweb="select"] > div {
-        border-radius: 4px;
-        padding: 8px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -161,122 +147,67 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Main Header
-st.markdown("<h1 style='text-align: center;'>BigBasket Stock Tracker</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>BigBasket Stock Dashboard</h1>", unsafe_allow_html=True)
 
 # Fetch brands
 brands_df = fetch_brands_from_sheet1()
 brand_list = brands_df['Brand Name'].tolist()
 
-# Single Autocomplete Search Bar
-st.subheader("Brand Search")
-selected_brand = st.selectbox(
-    "Search for a brand (type to filter)", 
-    options=brand_list,
-    index=None,
-    placeholder="Start typing brand name...",
-    key="brand_search"
-)
-
 # Tabs
-tab1, tab2 = st.tabs(["Brand Analysis", "Competitor Comparison"])
+tab1, tab2 = st.tabs(["Own Brand Analysis", "Competitor Brand Analysis"])
 
-# Brand Analysis Tab
+# Own Brand Tab
 with tab1:
-    if selected_brand:
-        st.subheader(f"Analyzing: {selected_brand}")
-        
-        if st.button("Analyze Brand", key="analyze"):
-            brand_url = brands_df[brands_df['Brand Name'] == selected_brand]['Brand URL'].iloc[0]
+    st.subheader("Your Brand")
+    # Autocomplete-like search with proper display
+    own_brand_input = st.text_input("Type your brand name", key="own_brand_input", help="Start typing to filter suggestions")
+    filtered_brands = [b for b in brand_list if own_brand_input.lower() in b.lower()] if own_brand_input else brand_list
+    selected_own_brand = st.selectbox("Select your brand", filtered_brands, key="own_brand_select", index=0 if filtered_brands else None, help="Filtered based on your input")
+    
+    if st.button("Analyze Own Brand", key="own_analyze"):
+        brand_url = brands_df[brands_df['Brand Name'] == selected_own_brand]['Brand URL'].iloc[0] if selected_own_brand in brand_list else f"https://www.bigbasket.com/pb/{selected_own_brand.lower()}/"
+        with st.spinner(f"Scraping data for {selected_own_brand}..."):
+            df = scrape_brand_data(selected_own_brand, brand_url)
+            if not df.empty:
+                append_to_sheet2(df)
+                st.success(f"Scraped and saved data for {selected_own_brand}")
             
-            with st.spinner(f"Scraping data for {selected_brand}..."):
-                df = scrape_brand_data(selected_brand, brand_url)
-                if not df.empty:
-                    append_to_sheet2(df)
-                    st.success(f"Successfully scraped {len(df)} products for {selected_brand}")
-                    
-                    # Display results with formatting
-                    st.dataframe(df.style.applymap(
-                        lambda x: 'color: red' if x == 'Out of Stock' else '', 
-                        subset=['Stock Availability']
-                    ))
-                    
-                    # Out of stock analysis
-                    out_of_stock_df = df[df['Stock Availability'] == 'Out of Stock']
-                    if not out_of_stock_df.empty:
-                        st.subheader("Out of Stock Products")
-                        st.markdown(f"<p class='out-of-stock'>{len(out_of_stock_df)} products out of stock</p>", 
-                                    unsafe_allow_html=True)
-                        st.dataframe(out_of_stock_df)
-                    else:
-                        st.success("All products are in stock!")
-                else:
-                    st.warning(f"No products found for {selected_brand}")
-        else:
-            st.info("Click the 'Analyze Brand' button to start scraping")
-    else:
-        st.warning("Please select a brand to analyze")
-
-# Competitor Comparison Tab
-with tab2:
-    st.subheader("Compare with Competitors")
-    
-    if selected_brand:
-        st.write(f"Main brand: {selected_brand}")
-    
-    num_competitors = st.number_input("Number of competitors to compare", 
-                                     min_value=1, max_value=5, value=1)
-    
-    competitor_brands = []
-    
-    for i in range(num_competitors):
-        competitor = st.selectbox(
-            f"Search Competitor Brand {i+1}", 
-            options=brand_list,
-            index=None,
-            placeholder=f"Type competitor brand name {i+1}...",
-            key=f"comp_search_{i}"
-        )
-        if competitor:
-            competitor_brands.append(competitor)
-
-    if st.button("Analyze Competitors", key="comp_analyze") and competitor_brands:
-        all_data = []
-        
-        with st.spinner("Scraping competitor data..."):
-            for brand in competitor_brands:
-                brand_url = brands_df[brands_df['Brand Name'] == brand]['Brand URL'].iloc[0]
-                df = scrape_brand_data(brand, brand_url)
-                if not df.empty:
-                    all_data.append(df)
-            
-            if all_data:
-                combined_df = pd.concat(all_data)
-                append_to_sheet2(combined_df)
-                st.success(f"Scraped data for {len(competitor_brands)} competitors")
-                
-                # Display competitor analysis
-                st.subheader("Competitor Stock Analysis")
-                
-                # Summary stats
-                summary = []
-                for brand in competitor_brands:
-                    brand_df = combined_df[combined_df['Brand'] == brand]
-                    total = len(brand_df)
-                    out_of_stock = len(brand_df[brand_df['Stock Availability'] == 'Out of Stock'])
-                    summary.append({
-                        'Brand': brand,
-                        'Total Products': total,
-                        'Out of Stock': out_of_stock,
-                        '% Out of Stock': f"{(out_of_stock/total)*100:.1f}%" if total > 0 else "N/A"
-                    })
-                
-                st.dataframe(pd.DataFrame(summary))
-                
-                # Detailed view with color coding
-                st.subheader("Detailed Competitor Products")
-                st.dataframe(combined_df.style.applymap(
-                    lambda x: 'color: red' if x == 'Out of Stock' else '', 
-                    subset=['Stock Availability']
-                ))
+            # Filter and display only out-of-stock items
+            out_of_stock_df = df[df['Stock Availability'] == 'Currently unavailable']
+            if not out_of_stock_df.empty:
+                st.write(f"Out-of-Stock Products for {selected_own_brand}:")
+                st.dataframe(out_of_stock_df)  # Show only out-of-stock items
             else:
-                st.warning("No data scraped for competitors")
+                st.write(f"No out-of-stock products found for {selected_own_brand}.")
+
+# Competitor Brand Tab
+with tab2:
+    st.subheader("Competitor Brands (up to 5)")
+    competitor_brands = []
+    for i in range(5):
+        comp_input = st.text_input(f"Competitor Brand {i+1}", key=f"comp_input_{i}", help="Start typing to filter suggestions")
+        filtered_comp_brands = [b for b in brand_list if comp_input.lower() in b.lower()] if comp_input else brand_list
+        selected_comp_brand = st.selectbox(f"Select Competitor {i+1}", filtered_comp_brands, key=f"comp_select_{i}", index=0 if filtered_comp_brands else None)
+        competitor_brands.append(selected_comp_brand)
+
+    if st.button("Analyze Competitor Brands", key="comp_analyze"):
+        selected_brands = [b for b in competitor_brands if b]
+        if selected_brands:
+            with st.spinner("Scraping competitor data..."):
+                for brand in selected_brands:
+                    brand_url = brands_df[brands_df['Brand Name'] == brand]['Brand URL'].iloc[0] if brand in brand_list else f"https://www.bigbasket.com/pb/{brand.lower()}/"
+                    df = scrape_brand_data(brand, brand_url)
+                    if not df.empty:
+                        append_to_sheet2(df)
+                
+                st.success(f"Scraped and saved data for {', '.join(selected_brands)}")
+                
+                for brand in selected_brands:
+                    out_of_stock_df = get_out_of_stock_products(brand)
+                    if not out_of_stock_df.empty:
+                        st.write(f"Out-of-Stock Products for {brand}:")
+                        st.dataframe(out_of_stock_df)  # Show only out-of-stock items
+                    else:
+                        st.write(f"No out-of-stock products found for {brand}.")
+        else:
+            st.warning("Please enter at least one competitor brand.")

@@ -1,6 +1,5 @@
 streamlit
-selenium
-webdriver_manager
+requests
 beautifulsoup4
 pandas
 google-auth

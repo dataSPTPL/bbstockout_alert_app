@@ -1,8 +1,5 @@
 import streamlit as st
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
+import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import datetime
@@ -33,26 +30,22 @@ def fetch_brands_from_sheet1():
     df = pd.DataFrame(data, columns=headers)
     return df[['Brand Name', 'Brand URL']]
 
-# Function to scrape brand data using Brand URL
+# Function to scrape brand data using requests
 def scrape_brand_data(brand_name, brand_url):
     try:
-        options = Options()
-        options.add_argument("--headless=new")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--window-size=1920,1080")
-        options.add_argument("start-maximized")
-        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-
-        service_obj = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service_obj, options=options)
-
-        driver.get(brand_url)
-
-        soup = BeautifulSoup(driver.page_source, "html.parser")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+        }
+        response = requests.get(brand_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, "html.parser")
         product_containers = soup.find_all('div', class_='SKUDeck___StyledDiv-sc-1e5d9gk-0 eA-dmzP')
         all_data = []
+
+        if not product_containers:
+            st.warning(f"No product containers found for {brand_name}. The page might require JavaScript rendering.")
+            return pd.DataFrame()
 
         for container in product_containers:
             try:
@@ -88,7 +81,7 @@ def scrape_brand_data(brand_name, brand_url):
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             all_data.append({
-                'Brand': brand_name,  # Added to distinguish brands
+                'Brand': brand_name,
                 'Product Name': product_name,
                 'Price': price,
                 'Quantity': quantity,
@@ -97,9 +90,8 @@ def scrape_brand_data(brand_name, brand_url):
                 'Product URL': product_url
             })
 
-        driver.quit()
         return pd.DataFrame(all_data)
-    except Exception as e:
+    except requests.RequestException as e:
         st.error(f"Error scraping {brand_name}: {str(e)}")
         return pd.DataFrame()
 
@@ -155,56 +147,68 @@ st.title("BigBasket Stock Dashboard")
 brands_df = fetch_brands_from_sheet1()
 brand_list = brands_df['Brand Name'].tolist()
 
-# Single tab with all functionality
+# Single container for all functionality
 with st.container():
     # Your Brand Section
     st.subheader("Your Brand")
-    own_brand_input = st.text_input("Type your brand name (or select from dropdown)", key="own_brand")
-    if own_brand_input:
-        suggestions = [b for b in brand_list if own_brand_input.lower() in b.lower()]
+    own_brand = st.text_input("Type your brand name", key="own_brand", help="Start typing to see suggestions")
+    
+    # Display suggestions as a selectbox below the input
+    if own_brand:
+        suggestions = [b for b in brand_list if own_brand.lower() in b.lower()]
     else:
         suggestions = brand_list
     
-    own_brand = st.selectbox("Select your brand", suggestions, key="own_select")
+    if suggestions:  # Only show selectbox if there are suggestions
+        selected_own_brand = st.selectbox("Suggestions (select or keep typing)", suggestions, key="own_suggestion")
+    else:
+        selected_own_brand = own_brand  # Use typed value if no suggestions
     
     if st.button("Submit Your Brand", key="own_submit"):
-        brand_url = brands_df[brands_df['Brand Name'] == own_brand]['Brand URL'].iloc[0]
-        with st.spinner(f"Scraping data for {own_brand}..."):
-            df = scrape_brand_data(own_brand, brand_url)
+        # Use the selected suggestion if available, otherwise the typed value
+        final_own_brand = selected_own_brand if selected_own_brand in brand_list else own_brand
+        brand_url = brands_df[brands_df['Brand Name'] == final_own_brand]['Brand URL'].iloc[0] if final_own_brand in brand_list else f"https://www.bigbasket.com/pb/{final_own_brand.lower()}/"
+        with st.spinner(f"Scraping data for {final_own_brand}..."):
+            df = scrape_brand_data(final_own_brand, brand_url)
             if not df.empty:
                 append_to_sheet2(df)
-                st.success(f"Scraped and saved data for {own_brand}")
+                st.success(f"Scraped and saved data for {final_own_brand}")
             else:
-                st.warning(f"No data scraped for {own_brand}")
+                st.warning(f"No data scraped for {final_own_brand}")
         
-        out_of_stock_df = get_out_of_stock_products(own_brand)
+        out_of_stock_df = get_out_of_stock_products(final_own_brand)
         if not out_of_stock_df.empty:
-            st.write(f"Out-of-Stock Products for {own_brand}:")
+            st.write(f"Out-of-Stock Products for {final_own_brand}:")
             st.dataframe(out_of_stock_df)
         else:
-            st.write(f"No out-of-stock products found for {own_brand}.")
+            st.write(f"No out-of-stock products found for {final_own_brand}.")
 
-    st.markdown("---")  # Separator
+    st.markdown("---")
 
     # Competitor Brands Section
     st.subheader("Competitor Brands (up to 5)")
-    competitor_inputs = []
+    competitor_brands = []
     for i in range(5):
-        comp_input = st.text_input(f"Competitor Brand {i+1}", key=f"comp_{i}")
-        if comp_input:
-            suggestions = [b for b in brand_list if comp_input.lower() in b.lower()]
+        comp_brand = st.text_input(f"Competitor Brand {i+1}", key=f"comp_{i}", help="Start typing to see suggestions")
+        
+        if comp_brand:
+            suggestions = [b for b in brand_list if comp_brand.lower() in b.lower()]
         else:
             suggestions = brand_list
         
-        selected = st.selectbox(f"Select Competitor {i+1}", suggestions, key=f"comp_select_{i}")
-        competitor_inputs.append(selected)
+        if suggestions:
+            selected_comp_brand = st.selectbox(f"Suggestions for Competitor {i+1}", suggestions, key=f"comp_suggestion_{i}")
+        else:
+            selected_comp_brand = comp_brand
+        
+        competitor_brands.append(selected_comp_brand if selected_comp_brand in brand_list else comp_brand)
 
     if st.button("Submit Competitor Brands", key="comp_submit"):
-        selected_brands = [b for b in competitor_inputs if b]
+        selected_brands = [b for b in competitor_brands if b]  # Filter out empty inputs
         if selected_brands:
             with st.spinner("Scraping competitor data..."):
                 for brand in selected_brands:
-                    brand_url = brands_df[brands_df['Brand Name'] == brand]['Brand URL'].iloc[0]
+                    brand_url = brands_df[brands_df['Brand Name'] == brand]['Brand URL'].iloc[0] if brand in brand_list else f"https://www.bigbasket.com/pb/{brand.lower()}/"
                     df = scrape_brand_data(brand, brand_url)
                     if not df.empty:
                         append_to_sheet2(df)
@@ -218,4 +222,4 @@ with st.container():
                 else:
                     st.write(f"No out-of-stock products found for {brand}.")
         else:
-            st.warning("Please select at least one competitor brand.")
+            st.warning("Please enter at least one competitor brand.")

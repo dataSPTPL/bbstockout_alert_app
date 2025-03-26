@@ -3,7 +3,8 @@ import pandas as pd
 from scraper import scrape_brand_data
 import smtplib
 from email.mime.text import MIMEText
-import json
+import gspread
+from google.oauth2.service_account import Credentials
 
 # Email notification function
 def send_email(brand, product_name, sender_email, sender_password, recipient_email):
@@ -19,9 +20,26 @@ def send_email(brand, product_name, sender_email, sender_password, recipient_ema
             server.starttls()
             server.login(sender_email, sender_password)
             server.send_message(msg)
-        st.success(f"Email sent for {product_name}!")
+        st.success(f"Email sent to {recipient_email} for {product_name}!")
     except Exception as e:
         st.error(f"Failed to send email: {e}")
+
+# Fetch brand list from Google Sheet
+def get_brand_list(spreadsheet_url, creds_json):
+    SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+    try:
+        creds = Credentials.from_service_account_info(creds_json, scopes=SCOPES)
+        gc = gspread.authorize(creds)
+        spreadsheet = gc.open_by_url(spreadsheet_url)
+        worksheet = spreadsheet.worksheet("Sheet1")  # Assuming brands are in Sheet1
+        data = worksheet.get_all_values()
+        headers = data[0]
+        rows = data[1:]
+        brands = [row[0] for row in rows if row]  # Extract "Brand" column
+        return brands
+    except Exception as e:
+        st.error(f"Error fetching brand list: {e}")
+        return []
 
 # Streamlit app
 st.title("Stockout Alert Dashboard")
@@ -42,7 +60,15 @@ creds_json = {
 }
 sender_email = st.secrets["email"]["sender_email"]
 sender_password = st.secrets["email"]["sender_password"]
-recipient_email = st.secrets["email"]["recipient_email"]
+
+# Get recipient email from user
+recipient_email = st.text_input("Enter your email to receive stockout alerts:", key="recipient_email")
+if not recipient_email:
+    st.warning("Please enter an email address to proceed.")
+    st.stop()
+
+# Fetch brand list
+brand_list = get_brand_list(spreadsheet_url, creds_json)
 
 # Tabs for My Brand and Competitors
 tab1, tab2 = st.tabs(["My Brand", "Competitors"])
@@ -56,7 +82,7 @@ if 'competitor_data' not in st.session_state:
 # Tab 1: My Brand
 with tab1:
     st.header("My Brand")
-    my_brand = st.text_input("Enter your brand name:", key="my_brand_input")
+    my_brand = st.selectbox("Select or type your brand name:", options=[""] + brand_list, key="my_brand_input")
     if st.button("Submit My Brand"):
         if my_brand:
             with st.spinner(f"Scraping data for {my_brand}..."):
@@ -78,7 +104,7 @@ with tab2:
     num_competitors = 5
     competitor_brands = []
     for i in range(num_competitors):
-        brand = st.text_input(f"Enter competitor brand {i+1}:", key=f"comp_{i}")
+        brand = st.selectbox(f"Select or type competitor brand {i+1}:", options=[""] + brand_list, key=f"comp_{i}")
         if brand:
             competitor_brands.append(brand)
 

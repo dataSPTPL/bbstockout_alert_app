@@ -209,6 +209,11 @@ with tab1:
                         st.dataframe(out_of_stock_df)
                     else:
                         st.success("No products are out of stock!")
+                    
+                    # Show raw scraped data
+                    st.subheader("Raw Scraped Data")
+                    st.write(f"Total products scraped: {len(df)}")
+                    st.dataframe(df)
                 else:
                     st.warning(f"No products found for {selected_brand}")
         else:
@@ -246,23 +251,35 @@ with tab2:
             competitor_brands.append(competitor)
 
     if st.button("Analyze Competitors", key="comp_analyze") and competitor_brands:
+        all_data = []
         with st.spinner("Scraping competitor data..."):
             for brand in competitor_brands:
                 brand_url = brands_df[brands_df['Brand Name'] == brand]['Brand URL'].iloc[0]
                 df = scrape_brand_data(brand, brand_url)
                 if not df.empty:
-                    append_to_sheet2(df)
+                    all_data.append(df)
             
-            st.success(f"Scraped and saved data for {', '.join(competitor_brands)}")
-            
-            # Show only out-of-stock items for competitors
-            for brand in competitor_brands:
-                out_of_stock_df = get_out_of_stock_products(brand)
-                if not out_of_stock_df.empty:
-                    st.subheader(f"Out of Stock Products for {brand}")
-                    st.markdown(f"<p class='out-of-stock'>{len(out_of_stock_df)} products out of stock</p>", unsafe_allow_html=True)
-                    st.dataframe(out_of_stock_df)
-                else:
-                    st.success(f"No products are out of stock for {brand}!")
+            if all_data:
+                combined_df = pd.concat(all_data)
+                append_to_sheet2(combined_df)
+                st.success(f"Scraped and saved data for {', '.join(competitor_brands)}")
+                
+                # Show out-of-stock items for competitors
+                for brand in competitor_brands:
+                    out_of_stock_df = combined_df[combined_df['Brand'] == brand]
+                    out_of_stock_df = out_of_stock_df[out_of_stock_df['Stock Availability'] == 'Currently unavailable']
+                    if not out_of_stock_df.empty:
+                        st.subheader(f"Out of Stock Products for {brand}")
+                        st.markdown(f"<p class='out-of-stock'>{len(out_of_stock_df)} products out of stock</p>", unsafe_allow_html=True)
+                        st.dataframe(out_of_stock_df)
+                    else:
+                        st.success(f"No products are out of stock for {brand}!")
+                
+                # Show raw scraped data for all competitors
+                st.subheader("Raw Scraped Data for Competitors")
+                st.write(f"Total products scraped: {len(combined_df)}")
+                st.dataframe(combined_df)
+            else:
+                st.warning("No data scraped for competitors")
     elif not competitor_brands:
         st.warning("Please select at least one competitor brand.")

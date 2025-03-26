@@ -52,9 +52,11 @@ def scrape_brand_data(brand_name, brand_url):
             quantity = container.find('div', class_='py-1.5 xl:py-1')
             quantity = quantity.text.strip() if quantity else "N/A"
             
-            # Stock Availability - Check nested span for "Currently unavailable"
-            stock_elem = container.find('span', class_='Label-sc-15v1nk5-0 Tags___StyledLabel2-sc-aeruf4-1 gJxZPQ gPgOvC')
-            stock_status = "Currently unavailable" if stock_elem and "Currently unavailable" in stock_elem.text else "In Stock"
+            # Stock Availability - Look in the DeckImage div for "Currently unavailable"
+            deck_image = container.find('div', class_='DeckImage___StyledDiv-sc-1mdvxwk-1 jbskZj')
+            stock_status = "In Stock"
+            if deck_image and "Currently unavailable" in deck_image.text:
+                stock_status = "Currently unavailable"
             
             # Product URL
             product_link = container.find('a', href=True)
@@ -139,6 +141,7 @@ st.markdown("""
         border-radius: 4px;
         padding: 8px;
         font-size: 16px;
+        color: #000 !important;  /* Ensure text is visible */
     }
     </style>
 """, unsafe_allow_html=True)
@@ -162,14 +165,24 @@ st.markdown("<h1 style='text-align: center;'>BigBasket Stock Tracker</h1>", unsa
 brands_df = fetch_brands_from_sheet1()
 brand_list = brands_df['Brand Name'].tolist()
 
-# Single Autocomplete Search Bar
+# Single Autocomplete Search Bar with Session State
 st.subheader("Brand Search")
+
+# Use session state to persist the selected brand
+if 'selected_brand' not in st.session_state:
+    st.session_state.selected_brand = None
+
+# Update session state when a brand is selected
+def update_selected_brand():
+    st.session_state.selected_brand = st.session_state.brand_search
+
 selected_brand = st.selectbox(
     "Search for a brand (type to filter)", 
     options=brand_list,
-    index=None,  # Start with no selection
+    index=brand_list.index(st.session_state.selected_brand) if st.session_state.selected_brand in brand_list else None,
     placeholder="Start typing brand name...",
-    key="brand_search"
+    key="brand_search",
+    on_change=update_selected_brand
 )
 
 # Tabs
@@ -214,12 +227,20 @@ with tab2:
     
     competitor_brands = []
     for i in range(num_competitors):
+        # Use session state for competitor brands as well
+        if f'comp_search_{i}' not in st.session_state:
+            st.session_state[f'comp_search_{i}'] = None
+
+        def update_competitor(i=i):
+            st.session_state[f'comp_search_{i}'] = st.session_state[f'comp_search_{i}_select']
+
         competitor = st.selectbox(
             f"Search Competitor Brand {i+1}", 
             options=brand_list,
-            index=None,
+            index=brand_list.index(st.session_state[f'comp_search_{i}']) if st.session_state[f'comp_search_{i}'] in brand_list else None,
             placeholder=f"Type competitor brand name {i+1}...",
-            key=f"comp_search_{i}"
+            key=f"comp_search_{i}_select",
+            on_change=update_competitor
         )
         if competitor:
             competitor_brands.append(competitor)

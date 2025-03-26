@@ -1,7 +1,9 @@
 streamlit
 selenium
+webdriver_manager
 beautifulsoup4
 pandas
-webdriver-manager
-gspread
 google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client

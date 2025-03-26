@@ -8,7 +8,6 @@ import datetime
 from webdriver_manager.chrome import ChromeDriverManager
 import gspread
 from google.oauth2.service_account import Credentials
-import os
 
 # Function to scroll and load all content
 def scroll_and_load(driver):
@@ -92,5 +91,3 @@ def scrape_brand_data(brand_name, spreadsheet_url, creds_json):
 
     driver.quit()
     return df
-
-if __name__ == "__main__":

@@ -31,7 +31,7 @@ def fetch_brands_from_sheet1():
     headers = values[0]
     data = values[1:]
     df = pd.DataFrame(data, columns=headers)
-    return df[['Brand Name', 'Brand URL']]  # Return DataFrame with both columns
+    return df[['Brand Name', 'Brand URL']]
 
 # Function to scrape brand data using Brand URL
 def scrape_brand_data(brand_name, brand_url):
@@ -43,12 +43,12 @@ def scrape_brand_data(brand_name, brand_url):
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--window-size=1920,1080")
         options.add_argument("start-maximized")
-        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36")
+        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
 
         service_obj = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service_obj, options=options)
 
-        driver.get(brand_url)  # Use the full Brand URL from Sheet1
+        driver.get(brand_url)
 
         soup = BeautifulSoup(driver.page_source, "html.parser")
         product_containers = soup.find_all('div', class_='SKUDeck___StyledDiv-sc-1e5d9gk-0 eA-dmzP')
@@ -88,7 +88,7 @@ def scrape_brand_data(brand_name, brand_url):
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             all_data.append({
-                'Brand': brand_name,
+                'Brand': brand_name,  # Added to distinguish brands
                 'Product Name': product_name,
                 'Price': price,
                 'Quantity': quantity,
@@ -141,6 +141,10 @@ def get_out_of_stock_products(brand_name):
     headers = values[0]
     data = values[1:]
     df = pd.DataFrame(data, columns=headers)
+    
+    if 'Brand' not in df.columns or 'Stock Availability' not in df.columns:
+        return pd.DataFrame()
+    
     out_of_stock = df[(df['Brand'] == brand_name) & (df['Stock Availability'] != 'In Stock')]
     return out_of_stock
 
@@ -151,15 +155,11 @@ st.title("BigBasket Stock Dashboard")
 brands_df = fetch_brands_from_sheet1()
 brand_list = brands_df['Brand Name'].tolist()
 
-# Create tabs
-tab1, tab2 = st.tabs(["Your Brand", "Competitor Brands"])
-
-# Tab 1: Own Brand
-with tab1:
+# Single tab with all functionality
+with st.container():
+    # Your Brand Section
     st.subheader("Your Brand")
     own_brand_input = st.text_input("Type your brand name (or select from dropdown)", key="own_brand")
-    
-    # Filter suggestions based on input, default to full list if empty
     if own_brand_input:
         suggestions = [b for b in brand_list if own_brand_input.lower() in b.lower()]
     else:
@@ -167,8 +167,7 @@ with tab1:
     
     own_brand = st.selectbox("Select your brand", suggestions, key="own_select")
     
-    if st.button("Submit", key="own_submit"):
-        # Get the corresponding Brand URL
+    if st.button("Submit Your Brand", key="own_submit"):
         brand_url = brands_df[brands_df['Brand Name'] == own_brand]['Brand URL'].iloc[0]
         with st.spinner(f"Scraping data for {own_brand}..."):
             df = scrape_brand_data(own_brand, brand_url)
@@ -185,14 +184,13 @@ with tab1:
         else:
             st.write(f"No out-of-stock products found for {own_brand}.")
 
-# Tab 2: Competitor Brands
-with tab2:
+    st.markdown("---")  # Separator
+
+    # Competitor Brands Section
     st.subheader("Competitor Brands (up to 5)")
     competitor_inputs = []
     for i in range(5):
         comp_input = st.text_input(f"Competitor Brand {i+1}", key=f"comp_{i}")
-        
-        # Filter suggestions based on input, default to full list if empty
         if comp_input:
             suggestions = [b for b in brand_list if comp_input.lower() in b.lower()]
         else:
@@ -201,7 +199,7 @@ with tab2:
         selected = st.selectbox(f"Select Competitor {i+1}", suggestions, key=f"comp_select_{i}")
         competitor_inputs.append(selected)
 
-    if st.button("Submit Competitors", key="comp_submit"):
+    if st.button("Submit Competitor Brands", key="comp_submit"):
         selected_brands = [b for b in competitor_inputs if b]
         if selected_brands:
             with st.spinner("Scraping competitor data..."):

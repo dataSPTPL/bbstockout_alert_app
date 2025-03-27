@@ -31,8 +31,10 @@ def scrape_brand_data(brand_name, brand_url):
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"}
         response = requests.get(brand_url, headers=headers, timeout=10)
         response.raise_for_status()
-        soup = BeautifulSoup(response.content, "html.parser")
-        product_containers = soup.find_all('div', class_='SKUDeck___StyledDiv-sc-1e5d9gk-0 eA-dmzP')
+        soup = BeautifulSoup(response.text, "html.parser")
+        parent_container = soup.find('div', class_="grid grid-flow-col gap-x-6 relative mt-5 pb-5 border-t border-dashed border-silverSurfer-400")
+
+        product_containers = parent_container.find_all('div', class_='SKUDeck___StyledDiv-sc-1e5d9gk-0 eA-dmzP')
         all_data = []
 
         if not product_containers:
@@ -52,11 +54,9 @@ def scrape_brand_data(brand_name, brand_url):
             quantity = container.find('div', class_='py-1.5 xl:py-1')
             quantity = quantity.text.strip() if quantity else "N/A"
             
-            # Stock Availability - Look in the DeckImage div for "Currently unavailable"
-            deck_image = container.find('div', class_='DeckImage___StyledDiv-sc-1mdvxwk-1 jbskZj')
-            stock_status = "In Stock"
-            if deck_image and "Currently unavailable" in deck_image.text:
-                stock_status = "Currently unavailable"
+            availability = container.find('span',class_='Label-sc-15v1nk5-0 Tags___StyledLabel2-sc-aeruf4-1 gJxZPQ gPgOvC')
+            stock_availability=availability.text.strip() if availability else "In Stock"
+        
             
             # Product URL
             product_link = container.find('a', href=True)
@@ -71,7 +71,7 @@ def scrape_brand_data(brand_name, brand_url):
                 'Price': price,
                 'Quantity': quantity,
                 'Timestamp': timestamp,
-                'Stock Availability': stock_status,
+                'Stock Availability': stock_availability,
                 'Product URL': product_url
             })
         return pd.DataFrame(all_data)

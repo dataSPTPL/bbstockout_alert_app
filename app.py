@@ -31,10 +31,13 @@ def scrape_brand_data(brand_name, brand_url):
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"}
         response = requests.get(brand_url, headers=headers, timeout=10)
         response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
-        parent_container = soup.find('div', class_="grid grid-flow-col gap-x-6 relative mt-5 pb-5 border-t border-dashed border-silverSurfer-400")
+        # soup = BeautifulSoup(response.text, "html.parser")
+        # parent_container = soup.find('div', class_="grid grid-flow-col gap-x-6 relative mt-5 pb-5 border-t border-dashed border-silverSurfer-400")
 
-        product_containers = parent_container.find_all('div', class_='SKUDeck___StyledDiv-sc-1e5d9gk-0 eA-dmzP')
+        # product_containers = parent_container.find_all('div', class_='SKUDeck___StyledDiv-sc-1e5d9gk-0 eA-dmzP')
+        soup = BeautifulSoup(response.text, "html.parser")
+        product_containers = soup.find_all('li', class_='PaginateItems___StyledLi-sc-1yrbjdr-0 dDBqny')
+    
         all_data = []
 
         if not product_containers:
